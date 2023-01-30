@@ -82,16 +82,29 @@ class Head(nn.Module):
         wei = wei.masked_fill(self.tril[:T,:T] == 0, float('-inf')) # (B,T,T)
         wei = F.softmax(wei, dim=-1) # (B,T,T)
         # Weighted aggregation of the values
-        v = self.value(x) # (B,T,C)
-        out = wei @ v # (B,T,T) @ (B,T,C) --> (B,T,C)
+        v = self.value(x) # (B,T,head_size)
+        out = wei @ v # (B,T,T) @ (B,T,head_size) --> (B,T,head_size)
         return out
+
+class MultiHeadAttention(nn.Module):
+    """ Multiple heads of self-attention """
+
+    def __init__(self, num_heads, head_size):
+        super().__init__()
+        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+
+    def forward(self, x):
+        # Each head attends to the entire block,
+        # taking input of (B,T,n_embd) and producing out of (B,T,head_size)
+        # head_size = n_embd // num_heads
+        return torch.cat([h(x) for h in self.heads], dim=-1)
 
 class TinyTransformer(nn.Module):
     def __init__(self):
         super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
-        self.sa_head = Head(n_embd)
+        self.sa_heads = MultiHeadAttention(4, n_embd//4) # 4 heads, each (B,T,head_size)
         self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
@@ -100,7 +113,7 @@ class TinyTransformer(nn.Module):
         tok_emb = self.token_embedding_table(idx) # (B,T,n_embd)
         pos_emb = self.position_embedding_table(torch.arange(T, device=device)) # (T,n_embd)
         x = tok_emb + pos_emb # (B,T,n_embd)
-        x = self.sa_head(x)
+        x = self.sa_heads(x)    
         logits = self.lm_head(x) # (B,T,vocab_size)
 
         if targets is None:

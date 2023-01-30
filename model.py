@@ -2,20 +2,8 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-
-# --------Hyperparameters---------
-batch_size = 48 # 64 Independent sequences to process in parallel
-block_size = 160 # 256 Max context length for predictions
-max_iters = 5000
-eval_interval = 500
-learning_rate = 3e-4
-device = torch.device("mps")
-eval_iters = 200
-n_embd = 192 # 384
-n_head = 4 # 6
-n_layer = 6 # 6
-dropout = 0.2
-# --------------------------------
+from hyperparams import (block_size, device, n_embd, 
+                         n_head, n_layer, dropout)
 
 torch.manual_seed(1337)
 
@@ -55,8 +43,7 @@ class MultiHeadAttention(nn.Module):
 
     def forward(self, x):
         # Each head attends to the entire block,
-        # taking input of (B,T,n_embd) and producing out of (B,T,head_size)
-        # head_size = n_embd // num_heads
+        # taking input (B,T,n_embd) and producing output (B,T,head_size)
         out = torch.cat([h(x) for h in self.heads], dim=-1)
         out = self.proj(out) # Projection applied to output before residual connection
         out = self.dropout(out)
@@ -135,8 +122,6 @@ class TinyTransformer(nn.Module):
             else:
                 idx_cond = torch.cat((idx_cond, idx[:,-1:]), dim=1)
 
-            # Crop idx to last block_size tokens
-            # idx_cond = idx[:, -block_size:]
             # Get predictions
             logits, loss = self(idx_cond)
             # Get predictions for the last char for all batches

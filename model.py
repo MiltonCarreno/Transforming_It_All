@@ -99,12 +99,28 @@ class MultiHeadAttention(nn.Module):
         # head_size = n_embd // num_heads
         return torch.cat([h(x) for h in self.heads], dim=-1)
 
+class FeedForward(nn.Module):
+    """ A simple linear layer followed by a non-linearity"""
+
+    def __init__(self, layer_size):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(layer_size, layer_size),
+            nn.ReLU(),
+        )
+
+    def forward(self, x):
+        # Allows tokens to 'think' on the info derived from attention
+        return self.net(x)
+
+
 class TinyTransformer(nn.Module):
     def __init__(self):
         super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
         self.sa_heads = MultiHeadAttention(4, n_embd//4) # 4 heads, each (B,T,head_size)
+        self.ffwd = FeedForward(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
@@ -113,7 +129,8 @@ class TinyTransformer(nn.Module):
         tok_emb = self.token_embedding_table(idx) # (B,T,n_embd)
         pos_emb = self.position_embedding_table(torch.arange(T, device=device)) # (T,n_embd)
         x = tok_emb + pos_emb # (B,T,n_embd)
-        x = self.sa_heads(x)    
+        x = self.sa_heads(x) # (B,T,n_embd)
+        x = self.ffwd(x) # (B,T,n_embd)
         logits = self.lm_head(x) # (B,T,vocab_size)
 
         if targets is None:

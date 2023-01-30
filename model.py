@@ -1,16 +1,17 @@
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
 # --------Hyperparameters---------
-batch_size = 48 # 64 Independent sequences to process in parallel
-block_size = 96 # 256 Max context length for predictions
-max_iters = 3000
-eval_interval = 300
-learning_rate = 1e-2
+batch_size = 4 # 64 Independent sequences to process in parallel
+block_size = 8 # 256 Max context length for predictions
+max_iters = 5000
+eval_interval = 500
+learning_rate = 1e-3
 device = torch.device("mps")
 eval_iters = 200
-n_embd = 192 # 384
+n_embd = 32 # 384
 n_head = 4 # 6
 n_layer = 6 # 6
 dropout = 0.2
@@ -63,16 +64,46 @@ def estimate_loss():
     m.train()
     return out
 
+class Head(nn.Module):
+    """ One head of self-attention """
+    def __init__(self, head_size):
+        super().__init__()
+        self.key = nn.Linear(n_embd, head_size, bias=False)
+        self.query = nn.Linear(n_embd, head_size, bias=False)
+        self.value = nn.Linear(n_embd, head_size, bias=False)
+        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
+
+    def forward(self, x):
+        B,T,C = x.shape # (B,T,n_embd)
+        k = self.key(x) # (B,T,head_size)
+        q = self.query(x) # (B,T,head_size)
+        # Compute attention affinities
+        wei = q @ k.transpose(-2,-1) * k.shape[-1]**-0.5 # (B,T,C) @ (B,C,T) --> (B,T,T)
+        wei = wei.masked_fill(self.tril[:T,:T] == 0, float('-inf')) # (B,T,T)
+        wei = F.softmax(wei, dim=-1) # (B,T,T)
+        # Weighted aggregation of the values
+        v = self.value(x) # (B,T,C)
+        out = wei @ v # (B,T,T) @ (B,T,C) --> (B,T,C)
+        return out
 
 class TinyTransformer(nn.Module):
     def __init__(self):
         super().__init__()
-        self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
-        
+        self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
+        self.position_embedding_table = nn.Embedding(block_size, n_embd)
+        self.sa_head = Head(n_embd)
+        self.lm_head = nn.Linear(n_embd, vocab_size)
+
     def forward(self, idx, targets=None):
-        logits = self.token_embedding_table(idx)
-        
-        if targets == None:
+        B, T = idx.shape
+
+        tok_emb = self.token_embedding_table(idx) # (B,T,n_embd)
+        pos_emb = self.position_embedding_table(torch.arange(T, device=device)) # (T,n_embd)
+        x = tok_emb + pos_emb # (B,T,n_embd)
+        x = self.sa_head(x)
+        logits = self.lm_head(x) # (B,T,vocab_size)
+
+        if targets is None:
             loss = None
         else:
             B,T,C = logits.shape
@@ -83,9 +114,11 @@ class TinyTransformer(nn.Module):
         return logits, loss
 
     def generate(self, idx, max_new_tokens):
-        for _ in range(max_new_tokens):
+        for _ in tqdm(range(max_new_tokens)):
+            # Crop idx to last block_size tokens
+            idx_cond = idx[:, -block_size:]
             # Get predictions
-            logits, loss = self(idx)
+            logits, loss = self(idx_cond)
             # Get predictions for the last char for all batches
             logits = logits[:,-1,:]
             # Get probabilities with softmax
@@ -103,11 +136,11 @@ m = model.to(device)
 optimizer = torch.optim.AdamW(m.parameters(), lr=learning_rate)
 
 # Training loop
-for iter in range(max_iters):
+for iter in tqdm(range(max_iters)):
     # Evaluate loss of model every 'eval_interval'
     if iter % eval_interval == 0 or iter == (max_iters - 1):
         losses = estimate_loss()
-        print("-----")
+        print("\n-----")
         print(f"Step {iter}\nTrain Loss: {losses['train']:.4f}; Val Loss: {losses['val']:.4f}")
         
     xb, yb = get_batch('train') # Get batch of data

@@ -101,6 +101,26 @@ class Encoder(nn.Module):
         x = x + self.sa(self.ln1(x)) # Residual connection added to output MultiHeadAttention
         x = x + self.ffwd(self.ln2(x)) # Residual connection added to output FeedForward
         return x
+    
+class Decoder(nn.Module):
+    """ Decoder block """
+
+    def __init__(self, n_embd, n_heads):
+        super().__init__()
+        head_size = n_embd // n_heads
+        self.msa = MultiHeadAttention(n_heads, head_size, masking=True) # 4 heads, each (B,T,head_size)
+        self.ca = MultiHeadAttention(n_heads, head_size, masking=False) # 4 heads, each (B,T,head_size)
+        self.ffwd = FeedForward(n_embd)
+        self.ln1 = nn.LayerNorm(n_embd)
+        self.ln2 = nn.LayerNorm(n_embd)
+        self.ln3 = nn.LayerNorm(n_embd)
+        self.ln4 = nn.LayerNorm(n_embd)
+
+    def forward(self, xd, xe):
+        x = xd + self.msa(self.ln1(xd)) # Masked self-attention + residual connection
+        x = x + self.ca(self.ln2(x), self.ln3(xe)) # Non-masked cross-attention + residual connection
+        x = x + self.ffwd(self.ln4(x)) # Feed forward layer + residual connection
+        return x
 
 class TinyTransformer(nn.Module):
 

@@ -10,7 +10,7 @@ torch.manual_seed(1337)
 class Head(nn.Module):
     """ One head of attention; capable of masking, amd either self or cross-attention """
 
-    def __init__(self, head_size, masking=False):
+    def __init__(self, head_size, masking):
         super().__init__()
         self.key = nn.Linear(n_embd, head_size, bias=False)
         self.query = nn.Linear(n_embd, head_size, bias=False)
@@ -19,7 +19,7 @@ class Head(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.masking = masking
 
-    def forward(self, xd, xe=None):
+    def forward(self, xd, xe):
         B,T,C = xd.shape # (B,T,n_embd)
         # Self-attention: 'k','q','v' come from decoder
         # Cross-attention: 'k' and 'v' come from encoder, 'q' from decoder
@@ -39,16 +39,16 @@ class Head(nn.Module):
 class MultiHeadAttention(nn.Module):
     """ Multiple heads of self-attention """
 
-    def __init__(self, num_heads, head_size, masking=False):
+    def __init__(self, num_heads, head_size, masking):
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size, masking) for _ in range(num_heads)])
         self.proj = nn.Linear(n_embd, n_embd)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x):
+    def forward(self, xd, xe=None):
         # Each head attends to the entire block,
         # taking input (B,T,n_embd) and producing output (B,T,head_size)
-        out = torch.cat([h(x) for h in self.heads], dim=-1)
+        out = torch.cat([h(xd, xe) for h in self.heads], dim=-1)
         out = self.proj(out) # Projection applied to output before residual connection
         out = self.dropout(out)
         return out
@@ -77,6 +77,22 @@ class Block(nn.Module):
         super().__init__()
         head_size = n_embd // n_heads
         self.sa = MultiHeadAttention(n_heads, head_size, masking=True) # 4 heads, each (B,T,head_size)
+        self.ffwd = FeedForward(n_embd)
+        self.ln1 = nn.LayerNorm(n_embd)
+        self.ln2 = nn.LayerNorm(n_embd)
+
+    def forward(self, x):
+        x = x + self.sa(self.ln1(x)) # Residual connection added to output MultiHeadAttention
+        x = x + self.ffwd(self.ln2(x)) # Residual connection added to output FeedForward
+        return x
+
+class Encoder(nn.Module):
+    """ Encoder block """
+
+    def __init__(self, n_embd, n_heads):
+        super().__init__()
+        head_size = n_embd // n_heads
+        self.sa = MultiHeadAttention(n_heads, head_size, masking=False) # 4 heads, each (B,T,head_size)
         self.ffwd = FeedForward(n_embd)
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)

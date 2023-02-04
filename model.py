@@ -174,3 +174,65 @@ class TinyTransformer(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1)
         return idx
     
+class FullTransformer(nn.Module):
+
+    def __init__(self, input_vocab_size, output_vacab_size):
+        super().__init__()
+        self.input_token_embedding_table = nn.Embedding(input_vocab_size, n_embd)
+        self.output_token_embedding_table = nn.Embedding(output_vacab_size, n_embd)
+        self.position_embedding_table = nn.Embedding(block_size, n_embd)
+        # Encoder
+        self.encoders = nn.Sequential(*[Encoder(n_embd, n_head) for _ in range(n_layer)])
+        # Decoder
+        self.decoders = nn.Sequential(*[Decoder(n_embd, n_head) for _ in range(n_layer)])
+        self.ln_f = nn.LayerNorm(n_embd) # Final layer norm
+        self.lm_head = nn.Linear(n_embd, output_vacab_size)
+
+    def forward(self, idx, targets=None): # Change target to accept <START> token
+        B, T = idx.shape
+
+        pos_emb = self.position_embedding_table(torch.arange(T, device=device)) # (T,n_embd)
+        tok_emb_x = self.input_token_embedding_table(idx) # (B,T,n_embd)
+        tok_emb_y = self.output_token_embedding_table(targets) # (B,T,n_embd)
+    
+        x = tok_emb_x + pos_emb # (B,T,n_embd)
+        y = tok_emb_y + pos_emb # (B,T,n_embd)
+
+        y = self.encoders(y) # (B,T,n_embd)
+        x = self.decoders(x, y) # (B,T,n_embd)
+
+        x = self.ln_f(x) # (B,T,n_embd)
+        logits = self.lm_head(x) # (B,T,vocab_size)
+
+        if targets is None:
+            loss = None
+        else:
+            B,T,C = logits.shape
+            logits = logits.view(B*T,C)
+            targets = targets.view(B*T)
+            loss = F.cross_entropy(logits, targets)
+        
+        return logits, loss
+
+    def generate(self, idx, max_new_tokens):
+        idx_cond = 0
+        for i in tqdm(range(max_new_tokens)):
+            if i == 0:
+                idx_cond = idx[:,-1:]
+            elif block_size == idx_cond.size(dim=1):
+                idx_cond = idx[:,-5:]
+            else:
+                idx_cond = torch.cat((idx_cond, idx[:,-1:]), dim=1)
+
+            # Get predictions
+            logits, loss = self(idx_cond)
+            # Get predictions for the last char for all batches
+            logits = logits[:,-1,:]
+            # Get probabilities with softmax
+            probs = F.softmax(logits, dim=-1)
+            # Sample according to the probabilities
+            idx_next = torch.multinomial(probs, num_samples=1)
+            # Append sample
+            idx = torch.cat((idx, idx_next), dim=1)
+        return idx
+    

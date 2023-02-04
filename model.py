@@ -176,41 +176,44 @@ class TinyTransformer(nn.Module):
     
 class FullTransformer(nn.Module):
 
-    def __init__(self, input_vocab_size, output_vacab_size):
+    def __init__(self, encoder_vocab_size, decoder_vacab_size):
         super().__init__()
-        self.input_token_embedding_table = nn.Embedding(input_vocab_size, n_embd)
-        self.output_token_embedding_table = nn.Embedding(output_vacab_size, n_embd)
+        self.encoder_token_embedding_table = nn.Embedding(encoder_vocab_size, n_embd)
+        self.decoder_token_embedding_table = nn.Embedding(decoder_vacab_size, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
         # Encoder
         self.encoders = nn.Sequential(*[Encoder(n_embd, n_head) for _ in range(n_layer)])
         # Decoder
         self.decoders = nn.Sequential(*[Decoder(n_embd, n_head) for _ in range(n_layer)])
         self.ln_f = nn.LayerNorm(n_embd) # Final layer norm
-        self.lm_head = nn.Linear(n_embd, output_vacab_size)
+        self.lm_head = nn.Linear(n_embd, decoder_vacab_size)
 
-    def forward(self, idx, targets=None): # Change target to accept <START> token
-        B, T = idx.shape
+    def forward(self, encoder_input=None, decoder_input=None, training=True):
+        B1, T1 = encoder_input.shape
+        B2, T2 = decoder_input.shape
 
-        pos_emb = self.position_embedding_table(torch.arange(T, device=device)) # (T,n_embd)
-        tok_emb_x = self.input_token_embedding_table(idx) # (B,T,n_embd)
-        tok_emb_y = self.output_token_embedding_table(targets) # (B,T,n_embd)
+        pos_emb_x = self.position_embedding_table(torch.arange(T1, device=device)) # (T,n_embd)
+        pos_emb_y = self.position_embedding_table(torch.arange(T2, device=device)) # (T,n_embd)
+
+        tok_emb_x = self.encoder_token_embedding_table(encoder_input) # (B,T,n_embd)
+        tok_emb_y = self.decoder_token_embedding_table(decoder_input) # (B,T,n_embd)
     
-        x = tok_emb_x + pos_emb # (B,T,n_embd)
-        y = tok_emb_y + pos_emb # (B,T,n_embd)
+        x = tok_emb_x + pos_emb_x # (B,T,n_embd) Embedded input for encoder
+        y = tok_emb_y + pos_emb_y # (B,T,n_embd) Embedded input for decoder
 
-        y = self.encoders(y) # (B,T,n_embd)
-        x = self.decoders(x, y) # (B,T,n_embd)
+        encoder_output = self.encoders(x) # (B,T,n_embd)
+        decoder_output = self.decoders(y, encoder_output) # (B,T,n_embd)
 
-        x = self.ln_f(x) # (B,T,n_embd)
-        logits = self.lm_head(x) # (B,T,vocab_size)
+        out = self.ln_f(decoder_output) # (B,T,n_embd)
+        logits = self.lm_head(out) # (B,T,vocab_size)
 
-        if targets is None:
+        if not training:
             loss = None
         else:
             B,T,C = logits.shape
             logits = logits.view(B*T,C)
-            targets = targets.view(B*T)
-            loss = F.cross_entropy(logits, targets)
+            decoder_input = decoder_input.view(B*T)
+            loss = F.cross_entropy(logits, decoder_input)
         
         return logits, loss
 

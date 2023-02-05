@@ -13,7 +13,7 @@ with open("texts/tiny_borges.txt", "r", encoding="utf-8") as fd:
 chars = sorted(list(set(text)))
 vocab_size = len(chars) # Set vocab_size
 
-# Encode and decode for bidirectional character-integer translation
+# Encode and decoder for bidirectional character-integer translation
 stoi = {c:i for i, c in enumerate(chars)} # Dictionary chars to nums
 itos = {i:c for i, c in enumerate(chars)} # Dictionary nums to chars
 encode = lambda s: [stoi[c] for c in s]

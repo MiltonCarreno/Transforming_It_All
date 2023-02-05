@@ -8,40 +8,36 @@ from hyperparams import (block_size, device, n_embd,
 torch.manual_seed(1337)
 
 class Head(nn.Module):
-    """ One head of attention; capable of masking, amd either self or cross-attention """
+    """ One head of self-attention """
 
-    def __init__(self, head_size, masking=False):
+    def __init__(self, head_size):
         super().__init__()
         self.key = nn.Linear(n_embd, head_size, bias=False)
         self.query = nn.Linear(n_embd, head_size, bias=False)
         self.value = nn.Linear(n_embd, head_size, bias=False)
         self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
         self.dropout = nn.Dropout(dropout)
-        self.masking = masking
 
-    def forward(self, xd, xe=None):
-        B,T,C = xd.shape # (B,T,n_embd)
-        # Self-attention: 'k','q','v' come from decoder
-        # Cross-attention: 'k' and 'v' come from encoder, 'q' from decoder
-        k = self.key(xd) if xe is None else self.key(xe) # (B,T,head_size)
-        q = self.query(xd) # (B,T,head_size)
-        v = self.value(xd) if xe is None else self.value(xe) # (B,T,head_size)
+    def forward(self, x):
+        B,T,C = x.shape # (B,T,n_embd)
+        k = self.key(x) # (B,T,head_size)
+        q = self.query(x) # (B,T,head_size)
         # Compute attention affinities
         wei = q @ k.transpose(-2,-1) * k.shape[-1]**-0.5 # (B,T,C) @ (B,C,T) --> (B,T,T)
-        if self.masking: # Masking for decoder but not for encoder
-            wei = wei.masked_fill(self.tril[:T,:T] == 0, float('-inf')) # (B,T,T) **Masking**
+        wei = wei.masked_fill(self.tril[:T,:T] == 0, float('-inf')) # (B,T,T)
         wei = F.softmax(wei, dim=-1) # (B,T,T)
         wei = self.dropout(wei)
         # Weighted aggregation of the values
+        v = self.value(x) # (B,T,head_size)
         out = wei @ v # (B,T,T) @ (B,T,head_size) --> (B,T,head_size)
         return out
 
 class MultiHeadAttention(nn.Module):
     """ Multiple heads of self-attention """
 
-    def __init__(self, num_heads, head_size, masking=False):
+    def __init__(self, num_heads, head_size):
         super().__init__()
-        self.heads = nn.ModuleList([Head(head_size, masking) for _ in range(num_heads)])
+        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
         self.proj = nn.Linear(n_embd, n_embd)
         self.dropout = nn.Dropout(dropout)
 
@@ -76,7 +72,7 @@ class Block(nn.Module):
     def __init__(self, n_embd, n_heads):
         super().__init__()
         head_size = n_embd // n_heads
-        self.sa = MultiHeadAttention(n_heads, head_size, masking=True) # 4 heads, each (B,T,head_size)
+        self.sa = MultiHeadAttention(n_heads, head_size) # 4 heads, each (B,T,head_size)
         self.ffwd = FeedForward(n_embd)
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)

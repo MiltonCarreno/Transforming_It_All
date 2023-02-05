@@ -6,7 +6,7 @@ from hyperparams import device
 torch.manual_seed(1337)
 
 model = TinyTransformer(vocab_size)
-model.load_state_dict(torch.load("saved_model.pt"))
+model.load_state_dict(torch.load("saved_model_3.pt"))
 m = model.to(device)
 context = torch.zeros((1, 1), dtype=torch.long, device=device)
 
@@ -20,9 +20,7 @@ print("\n\n********Predictions********")
 print(decode(a))
 print("***************************\n")
 
-# t = '' 
-# for _ in range(100):
-#     t += decode(model.generate(context, max_new_tokens=96)[0].tolist())
-
-# open('more.txt', 'w').write(t)
+# context = torch.zeros((1, 1), dtype=torch.long, device=device)
+# a = decode(m.generate(context, max_new_tokens=10000)[0].tolist())
+# open("more.txt", "w").write(a)
 
